@@ -4,6 +4,9 @@ import os
 import hashlib
 #Needed for lossless compression
 import zlib
+#Needed for named tuple
+import collections
+import struct
 """
 Goal is to be able to create, add, commit, and push to a server (github) by the end of the week.
 These are the basic functions of a github client.
@@ -86,3 +89,82 @@ def init(repo):
     """Note that from the above function we can write find and read object functions:
     finding obviously just requires searching for the hash prefix and the rest of the hash, and we know how the header
     is organized so we just find the object and read out it's type and size."""
+
+    """Next is the git index, but what is the index anyways?:
+    it's basically the staging area, it holds staged changes that are ready to be committed.
+    List of file entries, ordered by path, which contains path name, modification time, sha-1 hash.
+    It lists *all* files in the current tree, not just files being staged for commit right now
+    
+    It's stored as a custom binary format, for each index the first 12 bytes are the header, the last 20 are the sha-1 hash of the rest of the index,
+    the bytes in between are index entries, each of the entries are 62 bytes plus path length and padding."""
+
+    #Struct for one entry in our git index (.git/index)
+
+    """Explanation for each of the named entries in our tuple:
+    ctime (change time) = last time file's metadata was changed
+    mtime (modification time )= last time file's content was changed
+    ctime_s: file's ctime in seconds
+    ctime_n file's last ctime in nanoseconds
+    mtime_s: file's last mtime in seconds
+    dev: device number, identfies the device the file resides on
+    ino: inode number, uniquely identifies file on the device
+    mode: File mode, encodes type and permissions
+    uid: user id of the file owner
+    gid: groupd id of the file owner
+    size: file size in bytes
+    sha1: sha1 hash of file's contents, points to the blob on git's object database
+    flags: a 16-bit field with extra meta data
+    path: path relative to repository root"""
+
+    IndexEntry = collections.namedtuple('IndexEntry', [
+        'ctime_s', 'ctime_n', 'mtime_s', 'dev', 'ino', 'mode',
+        'uid', 'gid', 'size', 'sha1', 'flags', 'path',
+    ])
+
+    #Read index file and return list of IndexEntry objects
+    def read_index():
+        try:
+            data = read_file(os.path.join('.git', 'index'))
+        except FileNotFoundError:
+            return []
+        #remember the last 20 bytes are a checksum of the rest of the index's contents
+        #so check the hash of the everything but the last 20 bytes of the file,
+        #if that matches the last 20 bytes of the file, the index is valid.
+        digest = hashlib.sha1(data[:-20]).digest()
+        assert digest == data[-20:], 'invalid index checksum'
+        #struct.unpack will interpret the first 12 bytes of the file
+        #! indicates big-endian byte order
+        #4s indicates a 4 byte string (should always be b'DIRC')
+        #L represents a 4 byte unsigned integer
+        #So !4sLL means the struct we're unpacking uses big-endian order, first you'll unpack a 4
+        #byte string into signature, then a 4-byte int into version (should always be 2 currently), then one more into num_entries
+        #out of the first 12 bytes of data.
+        signature, version, num_entries = struct.unpack('!4sLL', data[:12])
+        assert signature == b'DIRC', \
+        'invalid index signature {}'.format(signature)
+        assert version == 2, 'unknown index version {}'.format(version)
+        #our index entries is everything between the header and last 20 bytes
+        entry_data = data[12:-20]
+        entries = []
+        #i = current length of all entries before the current one
+        #so the second entries fields' end can be found at i = len(entry_1) + 62
+        i = 0
+        #ensure we don't run past the entry_data len when unpacking
+        while i + 62 < len(entry_data):
+            #our fields are 62 bytes total
+            #10 4 byte ints, a 20 length string, and a 2 byte char
+            fields_end = i + 62
+            #remember our tuple is current 10 ints, the 20 length sha1 hash
+            #H is 2-byte unsigned short, which in this case represents the flags field
+            fields = struct.unpack('!LLLLLLLLLL20sH', entry_data[i:fields_end])
+            #since our path can be of an arbitrary length
+            #we'll search for the NUL byte which signifies the end of the path
+            #then we can just store the path as entry_data[fields_end:path_end]
+            path_end = entry_data.index(b'\x00', fields_end)
+            path = entry_data[fields_end:path_end]
+            entry = IndexEntry(*(fields + (path.decode(),)))
+            entries.append(entry)
+            entry_len = ((62 + len(path) + 8) // 8) * 8
+            i += entry_len
+        assert len(entries == num_entries)
+        return entries
