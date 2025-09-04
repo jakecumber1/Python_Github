@@ -1,4 +1,4 @@
-#I, uh, hope it's obvious why we need this, but for file handling and repository initialization
+ #I, uh, hope it's obvious why we need this, but for file handling and repository initialization
 import os
 #used for determining object type
 import enum
@@ -9,6 +9,8 @@ import zlib
 #Needed for named tuple
 import collections
 import struct
+#Used to check differences between file copies
+import difflib
 #Used for commits
 import time
 #Used for talking with git servers
@@ -210,9 +212,69 @@ def read_index():
     assert len(entries == num_entries)
     return entries
     
-#Implement ls_files to print all files in the index
-#implement status to compare files in the index to the current directory tree, printing out what's new and deleted
-#Implement diff which prints a diff of each modified file showing what's in the index against what's in the current working copy
+#Prints list of files in the index (mode, sha1, and stage number if "details" true)
+def ls_files(details=False):
+    for entry in read_index():
+        if details:
+            stage = (entry.flags >> 12) & 3
+            print('{:6o} {} {:}\t{}'.format(entry.mode, entry.sha1.hex(), stage, entry.path))
+        else:
+            print(entry.path)
+
+#Get status of a working copy, return (changed_paths, new_paths, deleted_paths)
+def get_status():
+    paths = set()
+    for root, dirs, files in os.walk('.'):
+        dirs[:] = [d for d in dirs if d != '.git']
+        for file in files:
+            path = os.path.join(root, file)
+            path = path.replace('\\', '/')
+            if path.startswith('./'):
+                path = path[2:]
+            paths.add(path)
+        entries_by_path = {e.path: e for e in read_index()}
+        entry_paths = set(entries_by_path)
+        changed = {p for p in (paths & entry_paths)
+                   if hash_object(read_file(p), 'blob', write=False) != 
+                   entries_by_path[p].sha1.hex()}
+        new = paths - entry_paths
+        deleted = entry_paths - paths
+        return (sorted(changed), sorted(new), sorted(deleted))
+
+#shows status of working copy
+def status():
+    changed, new, deleted = get_status()
+    if changed:
+        print('Changed files')
+        for path in changed:
+            print(' ', path)
+    if new:
+        print('New files:')
+        for path in new:
+            print(' ', path)
+    if deleted:
+        print('Deleted files:')
+        for path in deleted:
+            print(' ', path)
+
+#Shows difference of files changed between index and working copy
+def diff():
+    changed, _, _ = get_status()
+    entries_by_path = {e.path: e for e in read_index()}
+    for i, path, in enumerate(changed):
+        sha1 = entries_by_path[path].sha1.hex()
+        obj_type, data = read_object(sha1)
+        assert obj_type == 'blob'
+        index_lines = data.decode().splitlines()
+        working_lines = read_file(path).decode().splitlines()
+        diff_lines = difflib.unified_diff(index_lines, working_lines,
+                                          '{} (index)'.format(path),
+                                          '{} (working copy)'.format(path),
+                                          lineterm='')
+        for line in diff_lines:
+            print(line)
+        if i < len(changed - 1):
+            print('-' * 70)
 
 """Committing
 performing a commit consists of writing two objects
