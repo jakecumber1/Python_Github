@@ -8,7 +8,7 @@ This repository is for the Gitpy source code pushed with git bash, if you want t
 
 2. Place gitpy.py outside of where you would like to create the repository (repository creation in the same folder is not yet implemented). Navigate to gitpy.py in your terminal of choice and run `py gitpy.py init gitpy` (if you want to create a gitpy repository)
 
-3. Copy the files (including gitpy.py itself!) over to the new repository folder, for me, it was gitpy.py itself. Open the repository in the terminal then run `py gitpy.py add filename` for each file added (in my case, just gitpy.py itself `py gitpy.py add gitpy.py`)
+3. Copy the files (including gitpy.py itself!) over to the new repository folder. Open the repository in the terminal then run `py gitpy.py add filename` for each file added (in my case, just gitpy.py itself `py gitpy.py add gitpy.py`)
 
 4. Git commit and add a message like so `py gitpy.py commit -m "if you see this, gitpy works!"`
 
